@@ -184,7 +184,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	// Build list of audio files (skip dirs, hidden files)
+	// build list of audio files (skip dirs, hidden files)
 	var files []string
 	for _, e := range entries {
 		if e.IsDir() || strings.HasPrefix(e.Name(), ".") {
@@ -203,7 +203,7 @@ func main() {
 		n := i + 1
 		normTrack := normalize(tr.title)
 
-		// Find best match by title similarity
+		// find best match by title similarity
 		bestFile := ""
 		bestScore := -1
 		for _, f := range files {
