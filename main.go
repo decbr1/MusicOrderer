@@ -2,28 +2,37 @@ package main
 
 import (
 	"encoding/json"
+	"flag"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 	"time"
 )
 
-const filePath = "/run/media/dia/Beef Boy/New Music Library/Non DRM'd Music/flac/100 CDs eBay/Michael Jackson - Dangerous/"
-const releaseMBID = "d6b52521-0dfa-390f-970f-790174c22752" // micheal jackson dangerous
 const ua = "mb-track-rename/0.1 (contact: decbrks@pm.me)"
 
-type mbRelease struct {
+type releaseSearchResp struct {
+	Releases []struct {
+		ID         string `json:"id"`
+		Status     string `json:"status"`
+		Country    string `json:"country"`
+		Date       string `json:"date"`
+		TrackCount int    `json:"track-count"`
+		Title      string `json:"title"`
+	} `json:"releases"`
+}
+
+type releaseLookupResp struct {
+	Title string `json:"title"`
 	Media []struct {
 		Position int `json:"position"`
 		Tracks   []struct {
 			Position int    `json:"position"`
-			Number   string `json:"number"`
 			Title    string `json:"title"`
 		} `json:"tracks"`
 	} `json:"media"`
@@ -37,22 +46,34 @@ type track struct {
 
 func sanitizeFilename(s string) string {
 	s = strings.TrimSpace(s)
-	// windows-illegal + generally annoying characters
 	repl := strings.NewReplacer(
-		"/", "／", "\\",
-		":", " -", "*", "", "-",
-		"?", "", "\"", "'", "|",
-		"<", "(", ">", ")", "＼",
+		"/", "／",
+		"\\", "＼",
+		":", " -",
+		"*", "",
+		"?", "",
+		"\"", "'",
+		"<", "(",
+		">", ")",
+		"|", "-",
 	)
 	return repl.Replace(s)
 }
 
-func main() {
-	client := &http.Client{Timeout: 15 * time.Second}
+// normalize for fuzzy matching:  lowercase, remove non-alphanumeric
+func normalize(s string) string {
+	s = strings.ToLower(s)
+	s = strings.Map(func(r rune) rune {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			return r
+		}
+		return -1
+	}, s)
+	return s
+}
 
-	//u := fmt.Sprintf("https://musicbrainz.org/ws/2/release/%s?inc=media+recordings&fmt=json", releaseMBID)
-	u := fmt.Sprintf("https://musicbrainz.org/ws/2/release/?query=rgid:%s&fmt=json&limit=25", releaseMBID)
-	req, err := http.NewRequest("GET", u, nil)
+func doGET(client *http.Client, url string, out any) {
+	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -69,19 +90,56 @@ func main() {
 		log.Fatalf("http %d: %s", res.StatusCode, string(b))
 	}
 
-	var r mbRelease
-	if err := json.NewDecoder(res.Body).Decode(&r); err != nil {
+	if err := json.NewDecoder(res.Body).Decode(out); err != nil {
 		log.Fatal(err)
 	}
+}
+
+func pickReleaseIDFromRGID(client *http.Client, rgid string) (string, error) {
+	u := fmt.Sprintf("https://musicbrainz.org/ws/2/release/?query=rgid:%s&fmt=json&limit=100", rgid)
+
+	var sr releaseSearchResp
+	doGET(client, u, &sr)
+
+	if len(sr.Releases) == 0 {
+		return "", fmt.Errorf("no releases found for rgid %s", rgid)
+	}
+
+	bestIdx := 0
+	bestScore := -1
+	for i, r := range sr.Releases {
+		s := 0
+		if r.Status == "Official" {
+			s += 1000
+		}
+		if r.TrackCount == 14 {
+			s += 200
+		}
+		if r.Country == "US" {
+			s += 50
+		}
+		if r.Date != "" {
+			s += 10
+		}
+		if s > bestScore {
+			bestScore = s
+			bestIdx = i
+		}
+	}
+
+	return sr.Releases[bestIdx].ID, nil
+}
+
+func lookupTracks(client *http.Client, releaseID string) ([]track, string, error) {
+	u := fmt.Sprintf("https://musicbrainz.org/ws/2/release/%s?inc=media+recordings&fmt=json", releaseID)
+
+	var rl releaseLookupResp
+	doGET(client, u, &rl)
 
 	var tracks []track
-	for _, m := range r.Media {
+	for _, m := range rl.Media {
 		for _, t := range m.Tracks {
-			tracks = append(tracks, track{
-				medium: m.Position,
-				pos:    t.Position,
-				title:  t.Title,
-			})
+			tracks = append(tracks, track{medium: m.Position, pos: t.Position, title: t.Title})
 		}
 	}
 
@@ -93,53 +151,115 @@ func main() {
 	})
 
 	if len(tracks) == 0 {
-		log.Fatal("no tracks returned from MusicBrainz (wrong MBID?)")
+		return nil, rl.Title, fmt.Errorf("no tracks on release %s", releaseID)
+	}
+	return tracks, rl.Title, nil
+}
+
+func main() {
+	dir := flag.String("dir", ".", "directory containing audio files")
+	mbid := flag.String("mbid", "", "MusicBrainz RELEASE MBID (best option)")
+	rgid := flag.String("rgid", "", "MusicBrainz RELEASE-GROUP MBID (script will pick a release)")
+	flag.Parse()
+
+	if *mbid == "" && *rgid == "" {
+		log.Fatal("usage: go run . -mbid <release-mbid> -dir <folder>\n   or: go run . -rgid <release-group-mbid> -dir <folder>")
 	}
 
-	entries, err := os.ReadDir(filePath)
+	client := &http.Client{Timeout: 20 * time.Second}
+
+	releaseID := *mbid
+	if releaseID == "" {
+		id, err := pickReleaseIDFromRGID(client, *rgid)
+		if err != nil {
+			log.Fatal(err)
+		}
+		releaseID = id
+	}
+
+	time.Sleep(1 * time.Second)
+
+	tracks, title, err := lookupTracks(client, releaseID)
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Printf("Using release %s: %s\n", releaseID, title)
+
+	entries, err := os.ReadDir(*dir)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	reNum := regexp.MustCompile(`^(\d{1,3})\b`)
-
-	existingByNum := map[int]string{}
+	// Build list of audio files (skip dirs, hidden files)
+	var files []string
 	for _, e := range entries {
-		if e.IsDir() {
+		if e.IsDir() || strings.HasPrefix(e.Name(), ".") {
 			continue
 		}
-		name := e.Name()
-		m := reNum.FindStringSubmatch(name)
-		if len(m) != 2 {
-			continue
-		}
-		var n int
-		_, _ = fmt.Sscanf(m[1], "%d", &n)
-		if n > 0 {
-			// first one wins
-			if _, ok := existingByNum[n]; !ok {
-				existingByNum[n] = name
-			}
-		}
+		files = append(files, e.Name())
 	}
+
+	if len(files) != len(tracks) {
+		fmt.Printf("Warning: %d files but %d tracks.  Proceeding anyway.\n", len(files), len(tracks))
+	}
+
+	used := make(map[string]bool)
 
 	for i, tr := range tracks {
 		n := i + 1
-		old, ok := existingByNum[n]
-		if !ok {
-			fmt.Printf("warning: no local file starting with %02d\n", n)
+		normTrack := normalize(tr.title)
+
+		// Find best match by title similarity
+		bestFile := ""
+		bestScore := -1
+		for _, f := range files {
+			if used[f] {
+				continue
+			}
+			// strip extension and normalize
+			base := strings.TrimSuffix(f, filepath.Ext(f))
+			normFile := normalize(base)
+
+			// simple substring match score
+			score := 0
+			if strings.Contains(normFile, normTrack) {
+				score = 100
+			} else if strings.Contains(normTrack, normFile) {
+				score = 50
+			} else {
+				// count common substrings (crude)
+				for _, word := range strings.Fields(normTrack) {
+					if len(word) > 2 && strings.Contains(normFile, word) {
+						score += 10
+					}
+				}
+			}
+
+			if score > bestScore {
+				bestScore = score
+				bestFile = f
+			}
+		}
+
+		if bestFile == "" || bestScore == 0 {
+			fmt.Printf("warning: no match for track %d %q\n", n, tr.title)
 			continue
 		}
 
-		ext := filepath.Ext(old)
+		used[bestFile] = true
+
+		ext := filepath.Ext(bestFile)
 		newName := fmt.Sprintf("%02d. %s%s", n, sanitizeFilename(tr.title), ext)
 
-		if old == newName {
+		oldPath := filepath.Join(*dir, bestFile)
+		newPath := filepath.Join(*dir, newName)
+
+		if oldPath == newPath {
 			continue
 		}
 
-		fmt.Printf("Renaming %q -> %q\n", old, newName)
-		if err := os.Rename(old, newName); err != nil {
+		fmt.Printf("%02d:  %q -> %q\n", n, bestFile, newName)
+		if err := os.Rename(oldPath, newPath); err != nil {
 			fmt.Printf("Error: %v\n", err)
 		}
 	}
