@@ -46,16 +46,10 @@ type track struct {
 
 func sanitizeFilename(s string) string {
 	s = strings.TrimSpace(s)
-	repl := strings.NewReplacer(
-		"/", "／",
-		"\\", "＼",
-		":", " -",
-		"*", "",
-		"?", "",
-		"\"", "'",
-		"<", "(",
-		">", ")",
-		"|", "-",
+	repl := strings.NewReplacer( // remove windows-illegal and generally annoying chars
+		"/", "／", "\\", "＼",
+		":", " -", "*", "", "?", "", "\"",
+		"<", "(", ">", ")", "|", "-", "'",
 	)
 	return repl.Replace(s)
 }
@@ -249,7 +243,7 @@ func main() {
 		used[bestFile] = true
 
 		ext := filepath.Ext(bestFile)
-		newName := fmt.Sprintf("%02d. %s%s", n, sanitizeFilename(tr.title), ext)
+		newName := fmt.Sprintf("%02d %s%s", n, sanitizeFilename(tr.title), ext)
 
 		oldPath := filepath.Join(*dir, bestFile)
 		newPath := filepath.Join(*dir, newName)
