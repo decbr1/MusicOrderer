@@ -14,7 +14,8 @@ import (
 	"time"
 )
 
-const releaseMBID = ""
+const filePath = "/run/media/dia/Beef Boy/New Music Library/Non DRM'd Music/flac/100 CDs eBay/Michael Jackson - Dangerous/"
+const releaseMBID = "d6b52521-0dfa-390f-970f-790174c22752" // micheal jackson dangerous
 const ua = "mb-track-rename/0.1 (contact: decbrks@pm.me)"
 
 type mbRelease struct {
@@ -49,7 +50,8 @@ func sanitizeFilename(s string) string {
 func main() {
 	client := &http.Client{Timeout: 15 * time.Second}
 
-	u := fmt.Sprintf("https://musicbrainz.org/ws/2/release/%s?inc=media+recordings&fmt=json", releaseMBID)
+	//u := fmt.Sprintf("https://musicbrainz.org/ws/2/release/%s?inc=media+recordings&fmt=json", releaseMBID)
+	u := fmt.Sprintf("https://musicbrainz.org/ws/2/release/?query=rgid:%s&fmt=json&limit=25", releaseMBID)
 	req, err := http.NewRequest("GET", u, nil)
 	if err != nil {
 		log.Fatal(err)
@@ -94,7 +96,7 @@ func main() {
 		log.Fatal("no tracks returned from MusicBrainz (wrong MBID?)")
 	}
 
-	entries, err := os.ReadDir(".")
+	entries, err := os.ReadDir(filePath)
 	if err != nil {
 		log.Fatal(err)
 	}
