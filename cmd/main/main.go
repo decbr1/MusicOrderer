@@ -32,8 +32,11 @@ type releaseLookupResp struct {
 	Media []struct {
 		Position int `json:"position"`
 		Tracks   []struct {
-			Position int    `json:"position"`
-			Title    string `json:"title"`
+			Position     int    `json:"position"`
+			Title        string `json:"title"`
+			ArtistCredit []struct {
+				Name string `json:"name"`
+			} `json:"artist-credit"`
 		} `json:"tracks"`
 	} `json:"media"`
 }
@@ -42,6 +45,7 @@ type track struct {
 	medium int
 	pos    int
 	title  string
+	artist string
 }
 
 func sanitizeFilename(s string) string {
@@ -91,6 +95,7 @@ func doGET(client *http.Client, url string, out any) {
 
 func pickReleaseIDFromRGID(client *http.Client, rgid string) (string, error) {
 	u := fmt.Sprintf("https://musicbrainz.org/ws/2/release/?query=rgid:%s&fmt=json&limit=100", rgid)
+	//u := fmt.Sprintf("https://musicbrainz.org/ws/2/release/%s?inc=media+recordings+artist-credits&fmt=json", rgid)
 
 	var sr releaseSearchResp
 	doGET(client, u, &sr)
@@ -125,7 +130,8 @@ func pickReleaseIDFromRGID(client *http.Client, rgid string) (string, error) {
 }
 
 func lookupTracks(client *http.Client, releaseID string) ([]track, string, error) {
-	u := fmt.Sprintf("https://musicbrainz.org/ws/2/release/%s?inc=media+recordings&fmt=json", releaseID)
+	//u := fmt.Sprintf("https://musicbrainz.org/ws/2/release/%s?inc=media+recordings&fmt=json", releaseID)
+	u := fmt.Sprintf("https://musicbrainz.org/ws/2/release/%s?inc=media+recordings+artist-credits&fmt=json", releaseID)
 
 	var rl releaseLookupResp
 	doGET(client, u, &rl)
@@ -133,7 +139,16 @@ func lookupTracks(client *http.Client, releaseID string) ([]track, string, error
 	var tracks []track
 	for _, m := range rl.Media {
 		for _, t := range m.Tracks {
-			tracks = append(tracks, track{medium: m.Position, pos: t.Position, title: t.Title})
+			artist := "Unknown"
+			if len(t.ArtistCredit) > 0 {
+				artist = t.ArtistCredit[0].Name
+			}
+			tracks = append(tracks, track{
+				medium: m.Position,
+				pos:    t.Position,
+				title:  t.Title,
+				artist: artist,
+			})
 		}
 	}
 
@@ -154,6 +169,8 @@ func main() {
 	dir := flag.String("dir", ".", "directory containing audio files")
 	mbid := flag.String("mbid", "", "MusicBrainz RELEASE MBID (best option)")
 	rgid := flag.String("rgid", "", "MusicBrainz RELEASE-GROUP MBID (script will pick a release)")
+	artistInFilename := flag.Bool("artist-in-filename", false, "include artist name in output filenames")
+
 	flag.Parse()
 
 	if *mbid == "" && *rgid == "" {
@@ -243,7 +260,12 @@ func main() {
 		used[bestFile] = true
 
 		ext := filepath.Ext(bestFile)
-		newName := fmt.Sprintf("%02d %s%s", n, sanitizeFilename(tr.title), ext)
+		var newName string
+		if *artistInFilename {
+			newName = fmt.Sprintf("%02d %s - %s%s", n, sanitizeFilename(tr.artist), sanitizeFilename(tr.title), ext)
+		} else {
+			newName = fmt.Sprintf("%02d %s%s", n, sanitizeFilename(tr.title), ext)
+		}
 
 		oldPath := filepath.Join(*dir, bestFile)
 		newPath := filepath.Join(*dir, newName)
