@@ -63,11 +63,13 @@ Using release ae5efacd-f75f-432a-9f22-b35d3169d21f: Dangerous
 - `-mbid` - MusicBrainz Release MBID (recommended for accuracy)
 - `-rgid` - MusicBrainz Release Group MBID (script selects best release)
 - `-dir` - Directory containing audio files (default: current directory)
+- `--artist-in-filename` - Add artist name prefix to filenames
 
 ### mbfind
 - `-artist` - Artist name (required)
 - `-album` - Album title (required)
 - `-limit` - Number of results to display (default: 10)
+
 
 ## How It Works
 
