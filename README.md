@@ -10,6 +10,9 @@ This project consists of two complementary tools:
 
 ## Usage
 
+the files in the `releases/` directory probably wont work as of right now. oh well!<br>
+use `go run .` from a git clone instead for now
+
 ### Finding Release IDs
 
 Use `mbfind` to search for an album and get its MusicBrainz IDs:
