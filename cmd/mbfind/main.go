@@ -126,7 +126,9 @@ func main() {
 	flag.Parse()
 
 	if strings.TrimSpace(*artist) == "" || strings.TrimSpace(*album) == "" {
-		log.Fatal("usage: go run ./cmd/mbfind -artist <name> -album <title>")
+		log.Fatal(`
+			incorrect usage. replace (command) with one of the following: { go run . || ./mbfind || mbfind.exe }
+				usage: (command) -artist <name> -album <title>`)
 	}
 
 	client := &http.Client{Timeout: 20 * time.Second}

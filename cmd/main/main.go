@@ -174,7 +174,10 @@ func main() {
 	flag.Parse()
 
 	if *mbid == "" && *rgid == "" {
-		log.Fatal("usage: go run . -mbid <release-mbid> -dir <folder>\n   or: go run . -rgid <release-group-mbid> -dir <folder>")
+		log.Fatal(`
+		incorrect usage. replace (command) with one of the following: { go run . || ./main || main.exe }
+			usage: (command) -mbid <release-mbid> -dir <folder>
+			or:    (command) -rgid <release-group-mbid> -dir <folder>`)
 	}
 
 	client := &http.Client{Timeout: 20 * time.Second}
